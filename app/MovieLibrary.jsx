@@ -10,6 +10,8 @@ export default function MovieLibrary({ defaultCount, workerCount: workerCountVal
   const [alertVisible, setAlertVisible] = useState(false);
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [resolvingDownloads, setResolvingDownloads] = useState({});
+  const [resolvedDownloads, setResolvedDownloads] = useState({});
   const scanStarted = useRef(false);
   const visibleMovies = useMemo(() => movies.filter(movie => (movie.title || '').toLowerCase().includes(query.trim().toLowerCase())), [movies, query]);
 
@@ -19,6 +21,37 @@ export default function MovieLibrary({ defaultCount, workerCount: workerCountVal
     setAlertVisible(true);
     window.clearTimeout(notify.timeout);
     notify.timeout = window.setTimeout(() => setAlertVisible(false), 5000);
+  }
+
+  async function openDirectDownload(event, directLink) {
+    const anchor = event.currentTarget;
+    if (anchor.dataset.resolved === 'true') return;
+    event.preventDefault();
+    if (resolvingDownloads[directLink]) return;
+    setResolvingDownloads(current => ({ ...current, [directLink]: true }));
+    notify('Preparing direct download...');
+    try {
+      const response = await fetch('/api/direct-download', {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: directLink }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || `Could not resolve download (${response.status}).`);
+      setResolvedDownloads(current => ({ ...current, [directLink]: payload.url }));
+      anchor.href = payload.url;
+      anchor.dataset.resolved = 'true';
+      anchor.click();
+    } catch (cause) {
+      notify(cause.message || 'Could not prepare the direct download.', true);
+    } finally {
+      setResolvingDownloads(current => {
+        const next = { ...current };
+        delete next[directLink];
+        return next;
+      });
+    }
   }
 
   async function scan() {
@@ -132,7 +165,7 @@ export default function MovieLibrary({ defaultCount, workerCount: workerCountVal
                 <span className="download-label">{download.label || 'Download'}</span>
                 {download.magnet && <a className="btn-download btn-magnet" href={download.magnet}>Magnet</a>}
                 {download.torrent && <a className="btn-download btn-torrent" href={download.torrent} target="_blank" rel="noreferrer">Torrent</a>}
-                {download.directLink && <a className="btn-download btn-direct" href={download.directLink} target="_blank" rel="noopener noreferrer">Direct Link</a>}
+                {download.directLink && <a className="btn-download btn-direct" href={resolvedDownloads[download.directLink] || download.directLink} onClick={event => openDirectDownload(event, download.directLink)} aria-disabled={Boolean(resolvingDownloads[download.directLink])}>{resolvingDownloads[download.directLink] ? 'Preparing…' : 'Direct Download'}</a>}
               </div>)}
             </div>
           </div>
