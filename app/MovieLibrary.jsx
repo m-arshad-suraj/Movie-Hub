@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 export default function MovieLibrary({ defaultCount, workerCount: workerCountValue }) {
   const [movies, setMovies] = useState([]);
+  const [favoriteIds, setFavoriteIds] = useState([]);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
@@ -14,6 +15,34 @@ export default function MovieLibrary({ defaultCount, workerCount: workerCountVal
   const [resolvedDownloads, setResolvedDownloads] = useState({});
   const scanStarted = useRef(false);
   const visibleMovies = useMemo(() => movies.filter(movie => (movie.title || '').toLowerCase().includes(query.trim().toLowerCase())), [movies, query]);
+  const favoriteMovies = useMemo(() => visibleMovies.filter(movie => favoriteIds.includes(movie.topicId)), [visibleMovies, favoriteIds]);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem('movie-hub-favorites') || '[]');
+      if (Array.isArray(saved)) setFavoriteIds(saved.filter(id => Number.isSafeInteger(id)));
+    } catch { /* Ignore malformed stored favorites. */ }
+  }, []);
+
+  function toggleFavorite(event, movie) {
+    event.stopPropagation();
+    setFavoriteIds(current => {
+      const next = current.includes(movie.topicId)
+        ? current.filter(id => id !== movie.topicId)
+        : [...current, movie.topicId];
+      try { window.localStorage.setItem('movie-hub-favorites', JSON.stringify(next)); } catch { /* Favorites still work for this session. */ }
+      return next;
+    });
+  }
+
+  function renderMovie(movie) {
+    const isFavorite = favoriteIds.includes(movie.topicId);
+    return <article className="movie-card" key={movie.topicId} onClick={() => setSelected(movie)} tabIndex={0} role="button" aria-label={`View ${movie.title || 'movie'}`} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) setSelected(movie); }}>
+      {movie.imageUrl ? <img src={movie.imageUrl} alt={movie.title || 'Movie poster'} loading="lazy" onError={event => event.currentTarget.remove()} /> : <div className="movie-placeholder">No Image</div>}
+      <button className={`favorite-btn${isFavorite ? ' active' : ''}`} onClick={event => toggleFavorite(event, movie)} aria-label={isFavorite ? `Remove ${movie.title || 'movie'} from favorites` : `Add ${movie.title || 'movie'} to favorites`} aria-pressed={isFavorite} type="button">{isFavorite ? '♥' : '♡'}</button>
+      <div className="movie-info"><div className="movie-title">{movie.title || `Movie ${movie.topicId}`}</div></div>
+    </article>;
+  }
 
   function notify(message, isError = false) {
     setStatus(message);
@@ -145,13 +174,17 @@ export default function MovieLibrary({ defaultCount, workerCount: workerCountVal
       <span>{status}</span>
     </div>
 
-    <main id="movieContainer">
-      {visibleMovies.map(movie => <article className="movie-card" key={movie.topicId} onClick={() => setSelected(movie)} tabIndex={0} role="button" aria-label={`View ${movie.title || 'movie'}`} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') setSelected(movie); }}>
-        {movie.imageUrl ? <img src={movie.imageUrl} alt={movie.title || 'Movie poster'} loading="lazy" onError={event => event.currentTarget.remove()} /> : <div className="movie-placeholder">No Image</div>}
-        <div className="movie-info"><div className="movie-title">{movie.title || `Movie ${movie.topicId}`}</div></div>
-      </article>)}
-      {visibleMovies.length === 0 && <div className="empty-library">{busy ? 'Loading movies...' : movies.length ? 'No movies match your search.' : 'No movies loaded.'}</div>}
-    </main>
+    {favoriteMovies.length > 0 && <section className="library-section" aria-labelledby="favorites-heading">
+      <h2 id="favorites-heading" className="section-title">Favorites</h2>
+      <main className="movie-grid" aria-label="Favorite movies">{favoriteMovies.map(renderMovie)}</main>
+    </section>}
+    <section className="library-section" aria-label="All movies">
+      {favoriteMovies.length > 0 && <h2 className="section-title">All movies</h2>}
+      <main id="movieContainer" className="movie-grid">
+        {visibleMovies.map(renderMovie)}
+        {visibleMovies.length === 0 && <div className="empty-library">{busy ? 'Loading movies...' : movies.length ? 'No movies match your search.' : 'No movies loaded.'}</div>}
+      </main>
+    </section>
 
     {selected && <div className="modal show" role="presentation" onClick={() => setSelected(null)}>
       <div className="modal-content" role="dialog" aria-modal="true" aria-label={selected.title || 'Movie details'} onClick={event => event.stopPropagation()}>
